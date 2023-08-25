@@ -10,3 +10,11 @@ CREATE TABLE posts (
 		REFERENCES users (user_id),
 	content varchar(250)
 );
+
+CREATE TABLE sessions (
+	user_id int PRIMARY KEY,
+	session_id int NOT NULL,
+	time_created timestamp NOT NULL,
+	FOREIGN KEY(user_id)
+		REFERENCES users (user_id)
+);

@@ -136,11 +136,33 @@ impl BodyParse {
             .map(|form| form.split("=").last().expect("Form didn't have a value").to_string())
             .collect();
 
-        println!("{:?}", values);
         values     
     }
 
     fn get_body(&self) -> &str {
         self.body.as_str()
+    }
+}
+
+pub struct CookieParse{
+    headers: String
+}
+
+impl CookieParse {
+    pub fn new(headers: String) -> CookieParse {
+        CookieParse { headers }
+    }
+
+    pub fn cookie_values(&self) -> Vec<String> {
+        let header: Vec<String> = self.get_headers().lines()
+            .filter(|line| line.contains("Cookie:"))
+            .map(|line| line.split("=").last().unwrap().to_string())
+            .collect();
+        
+        header
+    }
+
+    pub fn get_headers(&self) -> &str {
+        self.headers.as_str()
     }
 }
