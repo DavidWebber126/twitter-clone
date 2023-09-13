@@ -52,7 +52,7 @@ impl HttpParser {
                 body_start_index = buffer.len();
                 (request_line, headers) = HttpParser::parse_head(&buffer);
                 let content_length: Option<usize> = HttpParser::parse_content_length(&headers);
-                println!("The content length is: {:?}", content_length);
+                //println!("The content length is: {:?}", content_length);
                 buffer.clear();
 
                 match content_length {
@@ -93,7 +93,7 @@ impl HttpParser {
             .filter(|line| line.contains("Content-Length"))
             .collect();
 
-        println!("content line is: {}", content_length_line);
+        //println!("content line is: {}", content_length_line);
 
         let content_length = content_length_line.split(": ").last().unwrap();
         let content_length: Result<usize, _> = content_length.parse();

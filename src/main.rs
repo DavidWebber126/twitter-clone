@@ -1,10 +1,18 @@
 use std::{
+    str,
     fs,
     io::prelude::*,
     net::{TcpListener, TcpStream},
 };
-use twitter_clone::{HttpParser, BodyParse, CookieParse};
+use rand::{SeedableRng, Rng};
+use rand::rngs::StdRng;
 use postgres::{Client, NoTls, Error};
+
+pub mod http;
+pub mod posts;
+use crate::http::{HttpParser, CookieParse, BodyParse};
+use crate::posts::Posts;
+
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
@@ -57,11 +65,13 @@ fn handle_get(request_line: String, headers: String) -> (&'static str, String, &
             "GET / HTTP/1.1" => ("HTTP/1.1 200 OK", "".to_string(), "login.html"),
             "GET /signup? HTTP/1.1" => ("HTTP/1.1 200 OK", "".to_string(), "signup.html"),
             "GET /homepage HTTP/1.1" => {
-                match is_valid_session(cookies.pop().unwrap()).unwrap() {
-                    true => {
-                        ("HTTP/1.1 200 OK", "".to_string(), "twit-home.html")
+                match valid_session(cookies.pop().unwrap()) {
+                    Some(id) => {
+                        let html = make_homepage(id);
+                        println!("YES!");
+                        ("HTTP/1.1 200 OK", "".to_string(), html)
                     },
-                    false => ("HTTP/1.1 303 See Other", "Location: /".to_string(), "twit-home.html")
+                    None => ("HTTP/1.1 303 See Other", "Location: /".to_string(), "twit-home.html")
                 }
                 
             },
@@ -78,20 +88,30 @@ fn handle_post(request_line: String, body: String) -> (&'static str, String, &'s
             // TODO: If username not in database then ask user to retry (add red text to html)
             let username = values.pop().unwrap();
 
-            if username_in_database(&username) {
-                let user_id = get_user_id(&username).unwrap();
-                let cookie = create_session(user_id).unwrap();
-                
-                ("HTTP/1.1 303 See Other",
-                format!("Location: /homepage\r\nSet-Cookie: id={cookie}; Secure; HttpOnly"),
-                "twit-home.html")
-            } else {
-                ("HTTP/1.1 200 OK", "".to_string(), "login-error.html")
+            match get_user_id(&username) {
+                Some(id) => {
+                    let cookie = create_session(id).unwrap();
+                    let html = make_homepage(id);
+                    ("HTTP/1.1 303 See Other",
+                    format!("Location: /homepage\r\nSet-Cookie: id={cookie}; Secure; HttpOnly"),
+                    html)
+                } 
+                None => {
+                    ("HTTP/1.1 200 OK", "".to_string(), "login-error.html")   
+                }
             }
         },
         "POST /signup HTTP/1.1" => {
             match add_user_to_users(values.pop().unwrap()) {
-                Ok(_) => ("HTTP/1.1 200 OK", "".to_string(), "twit-home.html"),
+                Ok(id) => {
+                    let cookie = create_session(id).unwrap();
+                    let html = make_homepage(id);
+                    (
+                        "HTTP/1.1 303 See Other",
+                        format!("Location: /homepage\r\nSet-Cookie: id={cookie}; Secure; HttpOnly"),
+                        html
+                    )
+                },
                 Err(_) => ("HTTP/1.1 200 OK", "".to_string(), "signup-error.html")
             }
             
@@ -102,82 +122,69 @@ fn handle_post(request_line: String, body: String) -> (&'static str, String, &'s
     (status_line, headers, filename)
 }
 
-fn add_user_to_users(username: String) -> Result<(), Error> {
+fn add_user_to_users(username: String) -> Result<i32, Error> {
     let connection_string = "host=localhost port=5432 dbname=Twit-Clone-Project user=postgres password=daVidtEen14";
     let mut client = Client::connect(connection_string, NoTls)?;
 
-    client.execute(
-        "INSERT INTO users (username) VALUES ($1)",
+    let mut id = client.query(
+        "INSERT INTO users (username) VALUES ($1) RETURNING user_id",
         &[&username]
     )?;
 
-    Ok(())
+    Ok(id.pop().unwrap().get(0))
 }
 
-fn get_user_id(username: &String) -> Result<i32, Error> {
+fn get_user_id(username: &String) -> Option<i32> {
     let connection_string = "host=localhost port=5432 dbname=Twit-Clone-Project user=postgres password=daVidtEen14";
     let mut client = Client::connect(connection_string, NoTls).expect("Could not connect to postgres");
     
     let mut query_results = client.query(
         "SELECT user_id FROM users WHERE username = $1",
-        &[&(username)]
-    )?;
+        &[username]
+    ).unwrap();
 
     match query_results.len() {
+        0 => None,
         1 => {
-            let row = query_results.pop().unwrap();
-            let id = row.get(0);
-            Ok(id)
+            let id: i32 = query_results.pop().unwrap().get(0);
+            Some(id)
         },
         _ => panic!("User id query returned more than one result")
     }
 }
 
-fn username_in_database(username: &String) -> bool {
-    let connection_string = "host=localhost port=5432 dbname=Twit-Clone-Project user=postgres password=daVidtEen14";
-    let mut client = Client::connect(connection_string, NoTls).expect("Could not connect to postgres");
-    
-    let query_results = client.query(
-        "SELECT user_id FROM users WHERE username = $1",
-        &[&(username)]
-    );
-
-    match query_results {
-        Ok(results) => {
-            if results.len() >= 1 {
-                true
-            } else {
-                false
-            }
-        }
-        Err(_) => false
-    }
-}
-
-fn is_valid_session(auth: String) -> Result<bool, Error> {
+fn valid_session(session_id: String) -> Option<i32> {
     let connection_string = "host=localhost port=5432 dbname=Twit-Clone-Project user=postgres password=daVidtEen14";
     let mut client = Client::connect(connection_string, NoTls).expect("Could not connect to postgres");
 
-    let session_id: i32 = auth.parse().unwrap();
-    let query_results = client.query(
+    let mut query_results = client.query(
         "SELECT user_id FROM sessions WHERE session_id = $1",
         &[&session_id]
-    )?;
+    ).unwrap();
 
+    
     match query_results.len() {
-        0 => Ok(false),
-        1 => Ok(true),
+        0 => None,
+        1 => {
+            let id: i32 = query_results.pop().unwrap().get(0);
+            Some(id)
+        }
         _ => panic!("Session id query returned multiple rows")
     }
 
 
 }
 
-fn create_session(user_id: i32) -> Result<i32, Error>{
+fn create_session(user_id: i32) -> Result<String, Error>{
     let connection_string = "host=localhost port=5432 dbname=Twit-Clone-Project user=postgres password=daVidtEen14";
     let mut client = Client::connect(connection_string, NoTls).expect("Could not connect to postgres");
 
-    let session_id: i32 = 1234;
+    let mut rng = StdRng::from_entropy();
+    let mut result: Vec<u8> = vec![0; 5];
+
+    rng.fill(&mut result[..]);
+
+    let session_id: String = result.iter().map(|int| int.to_string()).collect();
 
     client.execute(
         "INSERT INTO sessions (user_id, session_id, time_created)
@@ -188,4 +195,10 @@ fn create_session(user_id: i32) -> Result<i32, Error>{
     )?;
 
     Ok(session_id)
+}
+
+// Get list of posts made by followers
+fn make_homepage(id: i32) -> &'static str {
+    let posts = Posts::new(Posts::query_following_posts(id));
+    posts.html()
 }

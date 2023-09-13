@@ -1,5 +1,7 @@
 TODO:
-[] If session id (i.e cookie) is wrong, don't crash but bring user to login page
+[x] If session id (i.e cookie) is wrong, don't crash but bring user to login page
+[x] Create session id in a random way
 [] HTTPS instead of HTTPS
 [] Generate users homepage
+[] Have query functions in post module return Post Struct
 [x] Source Control

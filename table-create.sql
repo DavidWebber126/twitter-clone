@@ -3,6 +3,15 @@ CREATE TABLE users (
 	username varchar(20) NOT NULL
 );
 
+CREATE TABLE followers (
+	follower_id int,
+	followee_id int,
+	FOREIGN KEY(follower_id)
+		REFERENCES users (user_id),
+	FOREIGN KEY(followee_id)
+		REFERENCES users (user_id)
+);
+
 CREATE TABLE posts (
 	post_id serial PRIMARY KEY,
 	author_id int NOT NULL,
@@ -13,7 +22,7 @@ CREATE TABLE posts (
 
 CREATE TABLE sessions (
 	user_id int PRIMARY KEY,
-	session_id int NOT NULL,
+	session_id varchar(20) UNIQUE,
 	time_created timestamp NOT NULL,
 	FOREIGN KEY(user_id)
 		REFERENCES users (user_id)
